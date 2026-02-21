@@ -1,0 +1,37 @@
+[
+    {
+        "name": "Kyle Wright",
+        "firm": "Attorney at Law",
+        "email": "kyle@example.com",
+        "phone": "(419) 871-8085",
+        "address": "Mansfield, OH"
+    },
+    {
+        "name": "Troy Wisehart",
+        "firm": "Wisehart & Wisehart",
+        "email": "troy@example.com",
+        "phone": "(419) 871-8085",
+        "address": "6 W 3rd St Ste 200, Mansfield, OH 44902"
+    },
+    {
+        "name": "Anica Blazef-Horner",
+        "firm": "Blazef-Horner Law",
+        "email": "anica@example.com",
+        "phone": "(419) 522-7770",
+        "address": "34 Sturges Ave, Mansfield, OH"
+    },
+    {
+        "name": "Dale M. Musilli",
+        "firm": "Musilli Law",
+        "email": "dale@example.com",
+        "phone": "(419) 524-6522",
+        "address": "Mansfield, OH"
+    },
+    {
+        "name": "Karen L. Osborne",
+        "firm": "Richland County Legal Clinic",
+        "email": "richlandcountylegalclinic@gmail.com",
+        "phone": "",
+        "address": "12 North Diamond Street, Mansfield, Ohio 44902"
+    }
+]

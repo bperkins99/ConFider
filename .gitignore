@@ -1,0 +1,12 @@
+# Python Environments
+.venv/
+venv/
+__pycache__/
+
+# Local Secrets (DO NOT COMMIT)
+.streamlit/secrets.toml
+.env
+
+# Supabase Local
+supabase/.temp/
+supabase/.cli/
