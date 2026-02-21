@@ -27,11 +27,35 @@ ATTORNEYS_FILE = os.path.join(BASE_DIR, "attorneys.json")
 
 st.set_page_config(page_title="Jail Roster Lead Generator", page_icon="⚖️", layout="wide")
 
+# DEBUG: Temporary check for login issues
+# st.write(f"Current User: {st.session_state.get('user')}")
+
 # --- Authentication ---
 if "user" not in st.session_state:
     st.session_state["user"] = None
 if "subscription" not in st.session_state:
     st.session_state["subscription"] = None
+
+def fetch_user_settings(user_id):
+    if "settings" not in st.session_state:
+        st.session_state["settings"] = {"email_alerts": False, "alert_email": st.session_state["user"].email}
+    try:
+        res = supabase.table("user_settings").select("*").eq("id", user_id).execute()
+        if res.data:
+            st.session_state["settings"] = res.data[0]
+        else:
+            # Initialize settings if not found
+            supabase.table("user_settings").insert({"id": user_id, "email_alerts": False, "alert_email": st.session_state["user"].email}).execute()
+    except Exception:
+        pass
+
+def save_user_settings(user_id, settings):
+    try:
+        supabase.table("user_settings").upsert({"id": user_id, **settings}).execute()
+        st.session_state["settings"] = settings
+        st.sidebar.success("Settings saved!", icon="✅")
+    except Exception as e:
+        st.sidebar.error(f"Error saving settings: {e}")
 
 def fetch_subscription(user_id):
     try:
@@ -39,18 +63,28 @@ def fetch_subscription(user_id):
         if sub_res.data:
             st.session_state["subscription"] = sub_res.data[0]["plan_tier"]
         else:
+            # Initialize record in DB as free if not found
+            supabase.table("user_subscriptions").insert({"id": user_id, "plan_tier": "free"}).execute()
             st.session_state["subscription"] = "free"
     except Exception as e:
         st.session_state["subscription"] = "free"
+    
+    fetch_user_settings(user_id)
 
 def login(email, password):
     try:
+        # Debugging
+        # st.write(f"Attempting login for {email}...") 
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         if res.user:
             st.session_state["user"] = res.user
+            # st.success(f"Logged in as {res.user.email}")
             fetch_subscription(res.user.id)
+            return True
+        return False
     except Exception as e:
         st.error(f"Login Failed: {e}")
+        return False
 
 def signup(email, password):
     try:
@@ -82,14 +116,31 @@ if not st.session_state["user"]:
                 submit_signup = st.form_submit_button("Sign Up", use_container_width=True)
             
         if submit_login:
-            login(email, password)
-            st.rerun()
+            if login(email, password):
+                st.rerun()
         if submit_signup:
             signup(email, password)
     st.stop()
 
 st.sidebar.markdown(f"**Logged in as:** {st.session_state['user'].email}")
 st.sidebar.markdown(f"**Current Plan:** {str(st.session_state['subscription']).capitalize() if st.session_state['subscription'] else 'Free'}")
+
+# --- Notification Settings UI ---
+st.sidebar.markdown("---")
+with st.sidebar.expander("🔔 Notification Settings", expanded=False):
+    settings = st.session_state.get("settings", {"email_alerts": False, "alert_email": st.session_state["user"].email})
+    
+    email_alerts = st.toggle("Enable Email Alerts", value=settings.get("email_alerts", False))
+    alert_email = st.text_input("Alert Destination Email", value=settings.get("alert_email", st.session_state["user"].email))
+    
+    if st.button("Save Preferences", use_container_width=True):
+        updated_settings = {
+            "email_alerts": email_alerts,
+            "alert_email": alert_email
+        }
+        save_user_settings(st.session_state["user"].id, updated_settings)
+
+st.sidebar.markdown("---")
 if st.sidebar.button("Log Out"):
     logout()
     st.rerun()
@@ -165,10 +216,14 @@ with tab_leads:
             
             # --- Subscription Gate ---
             full_count = len(df)
-            if st.session_state.get("subscription") == "free":
+            tier = st.session_state.get("subscription", "free")
+            
+            if tier == "free":
                 stripe_url = f"https://buy.stripe.com/4gMdR8bwD2VJd8N07xb3q00?client_reference_id={st.session_state.get('user').id}"
                 st.info(f"⭐ **Free Plan (Demo Mode)**: Showing only the 3 most recent leads. [**Upgrade to the Jail Roster Plan for full access**]({stripe_url})")
                 filtered_df = filtered_df.head(3)
+            elif tier == "admin":
+                st.success("👑 **Admin Access**: Lead restrictions bypassed.")
 
             showing_count = len(filtered_df)
             st.markdown(f"### Showing {showing_count} Leads *(Out of {full_count} total)*")
