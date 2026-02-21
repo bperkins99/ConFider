@@ -7,12 +7,16 @@ import urllib.parse
 from datetime import datetime
 
 # Supabase Auth Configuration
-try:
-    SUPABASE_URL = st.secrets["supabase"]["url"]
-    SUPABASE_KEY = st.secrets["supabase"]["key"]
-except KeyError:
-    st.error("Missing Supabase configuration in `.streamlit/secrets.toml` or Streamlit Cloud Secrets.")
-    st.stop()
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    try:
+        SUPABASE_URL = st.secrets["supabase"]["url"]
+        SUPABASE_KEY = st.secrets["supabase"]["key"]
+    except Exception:
+        st.error("Missing Supabase configuration. Please set SUPABASE_URL and SUPABASE_KEY environment variables.")
+        st.stop()
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
