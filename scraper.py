@@ -8,13 +8,23 @@ import re
 import logging
 from datetime import datetime, timedelta
 import io
+from supabase import create_client, Client
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Supabase Configuration
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    logging.error("Missing SUPABASE_URL or SUPABASE_KEY environment variables.")
+    exit(1)
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 # Configuration
 URL = "https://www.richlandcountyoh.gov/departments/jail/WhosinJail"
-LEADS_FILE = "/home/brad/jail_roster_project/leads.json"
 # Target keywords in charges
 TARGET_CHARGES = [
     "OVI", "DUI", "FELONY", "ASSAULT", "DOMESTIC", "STRANGULATION",
@@ -24,15 +34,6 @@ TARGET_CHARGES = [
     "RESISTING", "OBSTRUCTING", "FALSIFICATION", "KIDNAPPING", "RAPE", "MANSLAUGHTER" # Serious/Other
 ]
 EXCLUDE_TERMS = ["Theft", "Traffic", "Probation"]
-
-def load_existing_leads():
-    try:
-        if os.path.exists(LEADS_FILE):
-            with open(LEADS_FILE, "r") as f:
-                return json.load(f)
-    except Exception as e:
-        logging.error(f"Error loading existing leads: {e}")
-    return []
 
 def get_pdf_download_url(page_url):
     try:
@@ -77,7 +78,6 @@ def process_inmate(inmate, leads, target_charges, date_threshold):
         booking_date = datetime.strptime(raw_date, "%m/%d/%Y")
         
         # Filter by Date (Last 24 hours) - using 24h as per requirement
-        # For testing, we might want to be lenient, but for prod use strict
         if booking_date < date_threshold:
             return
 
@@ -96,9 +96,11 @@ def process_inmate(inmate, leads, target_charges, date_threshold):
                 matched_charges.append(charge_clean)
         
         if matched_charges:
+            # Format date for Supabase (YYYY-MM-DD)
+            storage_date = booking_date.strftime("%Y-%m-%d")
             leads.append({
                 "name": inmate["name"],
-                "booking_date": raw_date,
+                "booking_date": storage_date,
                 "charges": matched_charges,
                 "all_charges": inmate["charges"],
             })
@@ -120,22 +122,14 @@ def extract_leads_from_pdf(pdf_file):
                 for table in tables:
                     for row in table:
                         if not any(row): continue
-                        # Basic row validation
                         if len(row) < 3: continue 
-                        
-                        # Headers check
                         if "Booking Date" in str(row[0]) or "Inmate" in str(row[1]): continue
 
                         booking_date_str = row[0]
                         name = row[1]
-                        # Charge is usually in column 6 or 7 depending on layout
                         charge = row[6] if len(row) > 6 else ""
 
-                        # Debug Log for filtering
-                        # logging.info(f"Checking: {name} | Date: {booking_date_str}")
-
                         if booking_date_str and name:
-                            # New Inmate
                             if current_inmate:
                                 process_inmate(current_inmate, leads, TARGET_CHARGES, target_date_threshold)
                             
@@ -145,10 +139,8 @@ def extract_leads_from_pdf(pdf_file):
                                 "charges": [charge] if charge else []
                             }
                         elif current_inmate and charge:
-                            # Continuation of charges for current inmate
                             current_inmate["charges"].append(charge)
             
-            # Process last one
             if current_inmate:
                 process_inmate(current_inmate, leads, TARGET_CHARGES, target_date_threshold)
 
@@ -158,7 +150,7 @@ def extract_leads_from_pdf(pdf_file):
     return leads
 
 def main():
-    logging.info("Starting scraper...")
+    logging.info("Starting scraper (Supabase Mode)...")
     
     # 1. Get Download URL
     pdf_url = get_pdf_download_url(URL)
@@ -174,32 +166,26 @@ def main():
     logging.info("Extracting leads...")
     new_leads = extract_leads_from_pdf(pdf_content)
     
-    # Historical Accumulation logic
-    existing_leads = load_existing_leads()
-    
-    # Create a set of existing unique keys (name + date)
-    existing_keys = {f"{lead['name']}_{lead['booking_date']}" for lead in existing_leads}
+    if not new_leads:
+        logging.info("No new leads found to upload.")
+        return
+
+    logging.info(f"Uploading {len(new_leads)} leads to Supabase...")
     
     added_count = 0
     for lead in new_leads:
-        key = f"{lead['name']}_{lead['booking_date']}"
-        if key not in existing_keys:
-            existing_leads.append(lead)
+        try:
+            # We use upsert with the 'unique_lead' constraint (name, booking_date)
+            # which we asked the user to create.
+            res = supabase.table("jail_leads").upsert(
+                lead, 
+                on_conflict="name, booking_date"
+            ).execute()
             added_count += 1
-            
-    # Sort leads newest first (descending by date)
-    try:
-        existing_leads.sort(key=lambda x: datetime.strptime(x['booking_date'].strip(), "%m/%d/%Y"), reverse=True)
-    except Exception as e:
-        logging.warning(f"Could not sort leads: {e}")
+        except Exception as e:
+            logging.error(f"Error uploading lead {lead['name']}: {e}")
 
-    # Save back the complete list
-    with open(LEADS_FILE, "w") as f:
-        json.dump(existing_leads, f, indent=4)
-    
-    logging.info(f"Found {len(new_leads)} recent leads. Added {added_count} NEW leads to history.")
-    logging.info(f"Total historical leads in database: {len(existing_leads)}")
-    logging.info(f"Saved to {LEADS_FILE}")
+    logging.info(f"Successfully processed {added_count} leads in Supabase.")
 
 if __name__ == "__main__":
     main()

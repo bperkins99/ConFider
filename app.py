@@ -146,9 +146,17 @@ if st.sidebar.button("Log Out"):
     st.rerun()
 
 
-# --- Helper Functions ---
+@st.cache_data(ttl=900) # Cache for 15 minutes
+def fetch_leads_from_supabase():
+    try:
+        res = supabase.table("jail_leads").select("*").order("booking_date", desc=True).execute()
+        return res.data
+    except Exception as e:
+        st.error(f"Error fetching leads: {e}")
+        return []
+
 @st.cache_data
-def load_data(filepath):
+def load_json_data(filepath):
     if not os.path.exists(filepath):
         return []
     try:
@@ -171,8 +179,8 @@ st.title("⚖️ Jail Roster Lead Generator")
 st.subheader("Richland County, Ohio")
 
 # Load Data
-leads_data = load_data(LEADS_FILE)
-attorneys_data = load_data(ATTORNEYS_FILE)
+leads_data = fetch_leads_from_supabase()
+attorneys_data = load_json_data(ATTORNEYS_FILE)
 
 # Create Tabs
 tab_leads, tab_attorneys = st.tabs(["📋 Leads", "📇 Attorney Directory"])
@@ -180,7 +188,7 @@ tab_leads, tab_attorneys = st.tabs(["📋 Leads", "📇 Attorney Directory"])
 # --- TAB 1: Leads ---
 with tab_leads:
     if not leads_data:
-        st.warning("No leads found. Run the scraper first.")
+        st.warning("No leads found in Supabase. Run the scraper first.")
     else:
         df = pd.DataFrame(leads_data)
         
@@ -189,8 +197,8 @@ with tab_leads:
         df["Select"] = True # Default selection state
 
         # --- Filtering & Sorting Logic ---
-        # Parse dates for filtering/sorting
-        df["parsed_date"] = pd.to_datetime(df["booking_date"], format="%m/%d/%Y", errors="coerce")
+        # Dates are already in ISO format from Supabase (YYYY-MM-DD)
+        df["parsed_date"] = pd.to_datetime(df["booking_date"], errors="coerce")
         df = df.sort_values(by="parsed_date", ascending=False).reset_index(drop=True)
 
         col1, col2 = st.columns([3, 1])
