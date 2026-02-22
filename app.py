@@ -268,7 +268,7 @@ with tab_leads:
             edited_df = st.data_editor(
                 filtered_df[display_cols],
                 column_config={
-                    "Select": st.column_config.CheckboxColumn("Select", default=True),
+                    "Select": st.column_config.CheckboxColumn("Select", default=False),
                     "mugshot_base64": st.column_config.ImageColumn("Mugshot", help="Booking Photo"),
                     "name": "Inmate Name",
                     "booking_date": "Booking Date",
@@ -276,8 +276,51 @@ with tab_leads:
                 },
                 use_container_width=True,
                 hide_index=True,
-                key="leads_editor"
+                key="leads_editor" # This key allows us to track state changes
             )
+            
+            # --- Detailed Inmate Profile View ---
+            # Find the rows where 'Select' is True
+            selected_indices = edited_df.index[edited_df['Select'] == True].tolist()
+            
+            if len(selected_indices) == 1:
+                # Exactly one lead selected, show detailed profile
+                selected_idx = selected_indices[0]
+                
+                # Fetch full row data from the ORIGINAL complete dataframe, not just the display columns
+                full_inmate_data = df.loc[filtered_df.index[selected_idx]]
+                
+                st.markdown("---") # Visual separator
+                
+                with st.expander(f"👤 Detailed Profile: {full_inmate_data['name']}", expanded=True):
+                    prof_col1, prof_col2 = st.columns([1, 2])
+                    
+                    with prof_col1:
+                        # Display Mugshot
+                        img_src = full_inmate_data.get('mugshot_base64')
+                        if pd.notna(img_src) and img_src:
+                            st.image(img_src, use_container_width=True)
+                        else:
+                            st.image(placeholder_img, use_container_width=True, caption="No Mugshot Available")
+                            
+                    with prof_col2:
+                        st.subheader(full_inmate_data['name'])
+                        st.write(f"**Booking Date:** {full_inmate_data['booking_date']}")
+                        
+                        st.markdown("**Current Charges:**")
+                        charges = full_inmate_data.get('charges', [])
+                        if isinstance(charges, list) and charges:
+                            for charge in charges:
+                                st.markdown(f"- {charge}")
+                        else:
+                            st.write("No specific charges listed.")
+                    
+                    st.divider()
+                    st.markdown("### 🔍 Prior Convictions / Background Report")
+                    st.info("⚠️ **Requires Integration:** Prior criminal history and verified contact information (phone/address) requires the third-party Skip-Tracing API integration.")
+            elif len(selected_indices) > 1:
+                st.markdown("---")
+                st.info(f"ℹ️ {len(selected_indices)} leads selected. Select exactly one lead to view their detailed profile.")
 
         with col2:
             st.markdown("### ✉️ Actions")
