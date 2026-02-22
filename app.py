@@ -316,8 +316,24 @@ with tab_leads:
                             st.write("No specific charges listed.")
                     
                     st.divider()
-                    st.markdown("### 🔍 Prior Convictions / Background Report")
-                    st.info("⚠️ **Requires Integration:** Prior criminal history and verified contact information (phone/address) requires the third-party Skip-Tracing API integration.")
+                    st.markdown("### 🔍 Skip-Traced Contact Info (Free Search)")
+                    
+                    status = full_inmate_data.get('skip_trace_status', 'unknown')
+                    phones = full_inmate_data.get('phone_numbers', [])
+                    
+                    if status == 'success':
+                        if phones and len(phones) > 0:
+                            st.success(f"Successfully scraped {len(phones)} potential phone number(s) from public directories.")
+                            for phone in phones:
+                                st.markdown(f"📞 **{phone}**")
+                        else:
+                            st.info("Scraper ran successfully, but no phone numbers were found for this individual in the public directory.")
+                    elif status == 'failed_blocked':
+                        st.error("🚨 **Admin Alert:** The free skip-tracing scraper was blocked by Cloudflare or another security check. The public directory has likely updated its bot defenses.")
+                    elif status == 'failed_error':
+                        st.error("🚨 **Admin Alert:** The headless scraper encountered an unexpected error while trying to navigate the public directory.")
+                    else:
+                        st.warning("No skip-tracing status recorded. This lead may have been scraped before the integration was added, or the background job is still running.")
             elif len(selected_indices) > 1:
                 st.markdown("---")
                 st.info(f"ℹ️ {len(selected_indices)} leads selected. Select exactly one lead to view their detailed profile.")

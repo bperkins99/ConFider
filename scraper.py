@@ -12,6 +12,57 @@ import base64
 import argparse
 import subprocess
 import openpyxl
+import asyncio
+from playwright.async_api import async_playwright
+try:
+    from playwright_stealth.stealth import Stealth
+except ImportError:
+    pass
+
+async def extract_thatsthem_data(name):
+    """
+    Spins up a headless Chromium browser using Playwright stealth to query ThatsThem.com
+    for phone numbers associated with the given name in Mansfield, OH.
+    """
+    url = f"https://thatsthem.com/name/{name.replace(' ', '-')}/Mansfield-OH"
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={'width': 1920, 'height': 1080}
+        )
+        page = await context.new_page()
+        try:
+            await Stealth().apply_stealth_async(page)
+        except Exception:
+            pass # Fails gracefully if Stealth isn't loaded properly
+        
+        try:
+            logging.info(f"Navigating to ThatsThem for {name}...")
+            response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(3000)
+            
+            content = await page.content()
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            if "Cloudflare" in soup.text or "Security Check" in soup.text:
+                 logging.warning(f"ThatsThem scraper blocked by Security for {name}.")
+                 return [], "failed_blocked"
+            else:
+                 text_content = soup.get_text()
+                 phone_pattern = re.compile(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}')
+                 phones = phone_pattern.findall(text_content)
+                 
+                 unique_phones = list(set([p.strip() for p in phones]))
+                 logging.info(f"Extracted {len(unique_phones)} phone strings for {name}.")
+                 return unique_phones, "success"
+                    
+        except Exception as e:
+            logging.error(f"Playwright Execution Error for {name}: {e}")
+            return [], "failed_error"
+        finally:
+            await browser.close()
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -204,7 +255,7 @@ def extract_leads_from_pdf(pdf_file, historical_backfill=False):
     return leads
 
 def main():
-    logging.info("Starting scraper (Supabase Mode)...")
+    logging.info("Starting scraper (Supabase Mode + Skip Tracing)...")
     
     # 1. Get Download URL
     pdf_url = get_pdf_download_url(URL)
@@ -223,6 +274,18 @@ def main():
     if not new_leads:
         logging.info("No new leads found to upload.")
         return
+
+    logging.info(f"Commencing skip-tracing for {len(new_leads)} new leads...")
+    for lead in new_leads:
+        try:
+            # Run the async Playwright function synchronously in this thread
+            phones, status = asyncio.run(extract_thatsthem_data(lead['name']))
+            lead['phone_numbers'] = phones
+            lead['skip_trace_status'] = status
+        except Exception as e:
+            logging.error(f"Failed to skip-trace {lead['name']}: {e}")
+            lead['phone_numbers'] = []
+            lead['skip_trace_status'] = "failed_error"
 
     logging.info(f"Uploading {len(new_leads)} leads to Supabase...")
     

@@ -7,4 +7,5 @@ openpyxl
 supabase
 extra-streamlit-components
 PyMuPDF
-
+playwright
+playwright-stealth
