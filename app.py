@@ -146,14 +146,11 @@ if st.sidebar.button("Log Out"):
     st.rerun()
 
 
-@st.cache_data(ttl=900) # Cache for 15 minutes
+@st.cache_data(ttl=300) # Cache for 5 minutes instead
 def fetch_leads_from_supabase():
-    try:
-        res = supabase.table("jail_leads").select("*").order("booking_date", desc=True).execute()
-        return res.data
-    except Exception as e:
-        st.error(f"Error fetching leads: {e}")
-        return []
+    # We do NOT catch the exception here so Streamlit doesn't cache the error state!
+    res = supabase.table("jail_leads").select("*").order("booking_date", desc=True).execute()
+    return res.data
 
 @st.cache_data
 def load_json_data(filepath):
@@ -179,7 +176,12 @@ st.title("⚖️ Jail Roster Lead Generator")
 st.subheader("Richland County, Ohio")
 
 # Load Data
-leads_data = fetch_leads_from_supabase()
+try:
+    leads_data = fetch_leads_from_supabase()
+except Exception as e:
+    st.error(f"Error fetching leads from database: {e}")
+    leads_data = []
+    
 attorneys_data = load_json_data(ATTORNEYS_FILE)
 
 # Create Tabs
