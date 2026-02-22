@@ -32,11 +32,7 @@ st.set_page_config(page_title="Jail Roster Lead Generator", page_icon="⚖️", 
 # st.write(f"Current User: {st.session_state.get('user')}")
 
 # --- Authentication ---
-@st.cache_resource
-def get_manager():
-    return stx.CookieManager()
-
-cookie_manager = get_manager()
+cookie_manager = stx.CookieManager()
 
 if "user" not in st.session_state:
     st.session_state["user"] = None
