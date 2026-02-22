@@ -277,8 +277,11 @@ with tab_leads:
             attorney_options = {f"{a['name']} ({a['firm']})": a for a in attorneys_data}
             selected_attorney_name = st.selectbox("Select Attorney:", options=list(attorney_options.keys()) if attorneys_data else [])
             
-            # Check for Secrets
-            has_secrets = "gmail" in st.secrets
+            # Check for Secrets safely
+            try:
+                has_secrets = "gmail" in st.secrets
+            except Exception:
+                has_secrets = False
             
             if st.button("Generate Drafts (Mailto)", type="secondary"):
                 # ... existing mailto logic (preserved as backup) ...
