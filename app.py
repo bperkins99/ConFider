@@ -5,6 +5,7 @@ import json
 import os
 import urllib.parse
 from datetime import datetime
+import extra_streamlit_components as stx
 
 # Supabase Auth Configuration
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -31,10 +32,29 @@ st.set_page_config(page_title="Jail Roster Lead Generator", page_icon="⚖️", 
 # st.write(f"Current User: {st.session_state.get('user')}")
 
 # --- Authentication ---
+@st.cache_resource(experimental_allow_widgets=True)
+def get_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_manager()
+
 if "user" not in st.session_state:
     st.session_state["user"] = None
 if "subscription" not in st.session_state:
     st.session_state["subscription"] = None
+
+# Attempt to restore session from cookie
+if not st.session_state["user"]:
+    token = cookie_manager.get(cookie="supa_token")
+    if token:
+        try:
+            res = supabase.auth.get_user(token)
+            if res.user:
+                st.session_state["user"] = res.user
+                fetch_subscription(res.user.id)
+        except Exception:
+            # Token might be expired or invalid
+            cookie_manager.delete("supa_token")
 
 def fetch_user_settings(user_id):
     if "settings" not in st.session_state:
@@ -78,8 +98,9 @@ def login(email, password):
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         if res.user:
             st.session_state["user"] = res.user
-            # st.success(f"Logged in as {res.user.email}")
             fetch_subscription(res.user.id)
+            if hasattr(res, 'session') and res.session:
+                cookie_manager.set("supa_token", res.session.access_token, max_age=86400*30) # 30 days
             return True
         return False
     except Exception as e:
@@ -100,6 +121,7 @@ def logout():
         pass
     st.session_state["user"] = None
     st.session_state["subscription"] = None
+    cookie_manager.delete("supa_token")
 
 if not st.session_state["user"]:
     col1, col2, col3 = st.columns([1, 2, 1])

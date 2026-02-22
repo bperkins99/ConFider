@@ -5,3 +5,4 @@ pdfplumber
 pandas
 openpyxl
 supabase
+extra-streamlit-components
