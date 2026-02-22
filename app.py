@@ -255,12 +255,21 @@ with tab_leads:
 
             showing_count = len(filtered_df)
             st.markdown(f"### Showing {showing_count} Leads *(Out of {full_count} total)*")
-            display_cols = ["Select", "name", "booking_date", "display_charges"]
+            display_cols = ["Select", "mugshot_base64", "name", "booking_date", "display_charges"]
             
+            # Default placeholder image (a simple gray silhouette or empty box)
+            placeholder_img = "https://raw.githubusercontent.com/bperkins99/ConFider/main/assets/placeholder.png"
+            
+            # Ensure mugshot_base64 exists and map None to placeholder
+            if "mugshot_base64" not in filtered_df.columns:
+                filtered_df["mugshot_base64"] = None
+            filtered_df["mugshot_base64"] = filtered_df["mugshot_base64"].apply(lambda x: x if pd.notna(x) and x else placeholder_img)
+
             edited_df = st.data_editor(
                 filtered_df[display_cols],
                 column_config={
                     "Select": st.column_config.CheckboxColumn("Select", default=True),
+                    "mugshot_base64": st.column_config.ImageColumn("Mugshot", help="Booking Photo"),
                     "name": "Inmate Name",
                     "booking_date": "Booking Date",
                     "display_charges": "Target Charges",

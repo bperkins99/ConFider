@@ -1,14 +1,17 @@
 import requests
 from bs4 import BeautifulSoup
 import pdfplumber
-import pandas as pd
-import json
 import os
 import re
 import logging
 from datetime import datetime, timedelta
 import io
 from supabase import create_client, Client
+import fitz
+import base64
+import argparse
+import subprocess
+import openpyxl
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -103,31 +106,79 @@ def process_inmate(inmate, leads, target_charges, date_threshold):
                 "booking_date": storage_date,
                 "charges": matched_charges,
                 "all_charges": inmate["charges"],
+                "mugshot_base64": inmate.get("mugshot_base64", None)
             })
     except ValueError as ve:
         logging.warning(f"Date parse error for {inmate['name']}: {inmate['booking_date_str']} - {ve}")
     except Exception as e:
         logging.error(f"Error processing inmate {inmate['name']}: {e}")
 
-def extract_leads_from_pdf(pdf_file):
+def extract_leads_from_pdf(pdf_file, historical_backfill=False):
     leads = []
-    current_inmate = None
-    # 48 hour window to catch "yesterday" bookings regardless of UTC server time
-    target_date_threshold = datetime.now() - timedelta(hours=48) 
+    
+    # Normally check 48 hours for new leads. If historical, accept the past 10 years.
+    if historical_backfill:
+        target_date_threshold = datetime.now() - timedelta(days=3650)
+    else:
+        target_date_threshold = datetime.now() - timedelta(hours=48) 
 
     try:
+        # Load PDF with both libraries
+        doc = fitz.open(stream=pdf_file, filetype="pdf")
+        
         with pdfplumber.open(pdf_file) as pdf:
-            for page in pdf.pages:
-                tables = page.extract_tables()
-                for table in tables:
-                    for row in table:
-                        if not any(row): continue
-                        if len(row) < 3: continue 
-                        if "Booking Date" in str(row[0]) or "Inmate" in str(row[1]): continue
+            for page_num, page in enumerate(pdf.pages):
+                # 1. Extract Images from this page using PyMuPDF
+                fitz_page = doc.load_page(page_num)
+                image_list = fitz_page.get_images(full=True)
+                page_images = []
+                
+                for img in image_list:
+                    xref = img[0]
+                    base_image = doc.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    image_ext = base_image["ext"]
+                    b64 = f"data:image/{image_ext};base64," + base64.b64encode(image_bytes).decode('utf-8')
+                    
+                    # Get coordinates of this image on the page
+                    rects = fitz_page.get_image_rects(xref)
+                    if rects:
+                        # Use the first bounding box found for the image
+                        rect = rects[0]
+                        page_images.append({
+                            "y0": rect.y0, # top
+                            "y1": rect.y1, # bottom
+                            "b64": b64
+                        })
 
-                        booking_date_str = row[0]
-                        name = row[1]
-                        charge = row[6] if len(row) > 6 else ""
+                # 2. Extract Text Rows and align images
+                tables = page.find_tables()
+                current_inmate = None
+
+                for table in tables:
+                    for r_idx, row_obj in enumerate(table.rows):
+                        row_bbox = row_obj.bbox # (x0, top, x1, bottom)
+                        row_top = row_bbox[1]
+                        row_bottom = row_bbox[3]
+                        
+                        # Extract text for this row
+                        row_texts = table.extract()[r_idx]
+                        if not any(row_texts) or len(row_texts) < 3: 
+                            continue 
+                        if "Booking Date" in str(row_texts[0]) or "Inmate" in str(row_texts[1]): 
+                            continue
+
+                        booking_date_str = row_texts[0]
+                        name = row_texts[1]
+                        charge = row_texts[6] if len(row_texts) > 6 else ""
+
+                        # Check if any image belongs to this row (image top falls inside row bbox top/bottom threshold)
+                        # Give a slight padding (e.g. 5px) to be safe
+                        matched_b64 = None
+                        for img_data in page_images:
+                            if row_top - 5 <= img_data["y0"] <= row_bottom + 5:
+                                matched_b64 = img_data["b64"]
+                                break
 
                         if booking_date_str and name:
                             if current_inmate:
@@ -136,13 +187,16 @@ def extract_leads_from_pdf(pdf_file):
                             current_inmate = {
                                 "name": name,
                                 "booking_date_str": booking_date_str,
-                                "charges": [charge] if charge else []
+                                "charges": [charge] if charge else [],
+                                "mugshot_base64": matched_b64
                             }
                         elif current_inmate and charge:
                             current_inmate["charges"].append(charge)
-            
-            if current_inmate:
-                process_inmate(current_inmate, leads, TARGET_CHARGES, target_date_threshold)
+                
+                # Check for last inmate on the page
+                if current_inmate:
+                    process_inmate(current_inmate, leads, TARGET_CHARGES, target_date_threshold)
+
 
     except Exception as e:
         logging.error(f"Error parsing PDF: {e}")

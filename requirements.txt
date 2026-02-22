@@ -6,3 +6,5 @@ pandas
 openpyxl
 supabase
 extra-streamlit-components
+PyMuPDF
+
